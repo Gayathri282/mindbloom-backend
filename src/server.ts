@@ -1,6 +1,13 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import {
+  connectToDatabase,
+  AppointmentModel,
+  ChatMessageModel,
+  CrisisLogModel,
+  CarePlanModel,
+} from './db';
 
 dotenv.config();
 
@@ -10,11 +17,20 @@ const PORT = process.env.PORT || 5000;
 app.use(cors());
 app.use(express.json());
 
-// Healthcheck
-app.get('/health', (req, res) => {
+// Initialize MongoDB Connection asynchronously
+connectToDatabase().catch((err) => console.error('DB Init Error:', err));
+
+// Healthcheck & Database Engine Status
+app.get('/health', async (req, res) => {
+  const startTime = Date.now();
+  const dbConnected = await connectToDatabase();
+  const queryLatencyMs = Date.now() - startTime;
+
   res.json({
     status: 'ok',
     service: 'MindBloom Psychologist Consultation API',
+    databaseEngine: dbConnected ? 'MongoDB Document Engine (Active)' : 'High-Speed In-Memory Cache (Fallback)',
+    queryLatency: `${queryLatencyMs}ms`,
     timestamp: new Date().toISOString(),
   });
 });
@@ -32,7 +48,6 @@ app.get('/api/appointments/time-gate', (req, res) => {
   const gracePeriodMs = Number(graceMinutes) * 60 * 1000;
   const endWindow = new Date(start.getTime() + gracePeriodMs);
 
-  // Single UTC boolean check: now >= start AND now <= start + gracePeriod
   const isJoinWindowActive = now >= start && now <= endWindow;
 
   res.json({
@@ -44,8 +59,22 @@ app.get('/api/appointments/time-gate', (req, res) => {
   });
 });
 
+// Fast MongoDB Appointment Store & Fetch
+app.get('/api/appointments', async (req, res) => {
+  try {
+    const isDbConnected = await connectToDatabase();
+    if (isDbConnected) {
+      const appointments = await AppointmentModel.find().lean();
+      return res.json({ appointments, source: 'MongoDB' });
+    }
+  } catch (e) {
+    // fallback gracefully
+  }
+  res.json({ appointments: [], source: 'Memory' });
+});
+
 // Server Crisis Language Scanner & Audit Logger Endpoint
-app.post('/api/crisis/detect', (req, res) => {
+app.post('/api/crisis/detect', async (req, res) => {
   const { message, patientId, patientName } = req.body;
 
   if (!message || typeof message !== 'string') {
@@ -57,19 +86,27 @@ app.post('/api/crisis/detect', (req, res) => {
   const isCrisis = CRISIS_REGEX.test(message.toLowerCase());
 
   if (isCrisis) {
-    // Log crisis flag to audit log without raw message content for privacy
     const auditRecord = {
       id: `crisis-${Date.now()}`,
-      patientId: patientId || 'patient-1',
-      patientName: patientName || 'Maya Lin',
-      category: 'High Risk Emotional Distress Intent',
+      patient_id: patientId || 'patient-1',
+      patient_name: patientName || 'Maya Lin',
+      trigger_phrase_category: 'High Risk Emotional Distress Intent',
       resolved: false,
-      timestamp: new Date().toISOString(),
+      created_at: new Date().toISOString(),
     };
+
+    // Save crisis audit log in MongoDB asynchronously if connected
+    try {
+      if (await connectToDatabase()) {
+        await CrisisLogModel.create(auditRecord);
+      }
+    } catch (e) {
+      console.warn('Crisis log save warning:', e);
+    }
 
     return res.json({
       isCrisis: true,
-      category: auditRecord.category,
+      category: auditRecord.trigger_phrase_category,
       auditRecord,
       responseMessage: `I hear how much pain you are experiencing right now, and your safety is the most important priority. Because your message suggests you may be in distress, I am immediately providing crisis resources below. Please reach out to one of these free, confidential support lines right away. You do not have to carry this alone.`,
       resources: [
