@@ -227,6 +227,57 @@ app.post('/api/payment/create-payment-link', async (req, res) => {
   }
 });
 
+// Helper to ensure we never call the user "MindBloom"
+function extractFirstName(rawName: string): string {
+  let name = (rawName || '').trim();
+  if (!name || name.toLowerCase().includes('mindbloom') || name.toLowerCase().includes('member') || name.toLowerCase().includes('patient')) {
+    return 'my friend';
+  }
+  return name.split(' ')[0];
+}
+
+// Dynamic non-scripted dialogue generator for local fallbacks
+function generateDynamicHumanReply(cleanPrompt: string, userName: string, historyLength: number): string {
+  const firstName = extractFirstName(userName);
+  const lower = cleanPrompt.toLowerCase();
+  const words = cleanPrompt.split(/\s+/).filter((w) => w.length > 3 && !['this', 'that', 'with', 'have', 'from', 'what', 'your', 'about', 'there', 'they', 'them'].includes(w.toLowerCase()));
+  const concept = words.length > 0 ? words[Math.floor(Math.random() * words.length)].replace(/[^a-zA-Z]/g, '') : '';
+
+  if (lower.includes('stress') || lower.includes('tired') || lower.includes('overwhelm') || lower.includes('busy') || lower.includes('exhausted')) {
+    const options = [
+      `I hear you, ${firstName}. Carrying all of this around can take a real toll on your spirit, and feeling ${concept ? `drained by ${concept}` : 'exhausted'} is completely understandable.\n\nYou don't have to carry every single responsibility tonight. What is one small task or expectation we can set aside for now so you can give yourself room to rest?`,
+      `That sounds genuinely exhausting, ${firstName}. When life gets this busy, it feels like there's no moment to catch your breath.\n\nIf you could pause everything for just 30 minutes, what would bring you the most peace right now?`,
+    ];
+    return options[historyLength % options.length];
+  }
+
+  if (lower.includes('anxi') || lower.includes('panic') || lower.includes('worry') || lower.includes('fear') || lower.includes('scared')) {
+    const options = [
+      `I can feel the tension in what you're sharing, ${firstName}. Take a slow, gentle breath with me right now. You are safe here in this moment.\n\nIs there a specific thought about ${concept || 'this situation'} that feels most intimidating right now, or is it more of a heavy overall feeling? We can take it one small step at a time.`,
+      `Worry has a way of making everything feel urgent and overwhelming, ${firstName}. I'm here with you.\n\nWhat is one grounded fact you know to be true right now, amidst all the uncertain thoughts?`,
+    ];
+    return options[historyLength % options.length];
+  }
+
+  if (lower.includes('sad') || lower.includes('lonely') || lower.includes('hurt') || lower.includes('depress') || lower.includes('down')) {
+    const options = [
+      `I'm really sorry you're going through this, ${firstName}. Sitting with sadness or feeling ${concept ? `hurt by ${concept}` : 'alone'} is really heavy, but I appreciate you trusting me with your feelings.\n\nYou don't have to pretend to be okay here. How long have you been carrying this feeling around?`,
+      `Thank you for being so honest with me, ${firstName}. It takes strength to acknowledge when you're feeling down.\n\nWhat has been the hardest part of your day today? I'm right here listening.`,
+    ];
+    return options[historyLength % options.length];
+  }
+
+  // General conversational natural replies
+  const generalReplies = [
+    `Thank you for opening up to me about this, ${firstName}. ${concept ? `Thinking through ${concept} seems to be really on your mind right now.` : "It sounds like there's a lot going on in your mind right now."}\n\nHow has this been impacting how you feel throughout your day?`,
+    `I hear where you're coming from, ${firstName}. ${concept ? `It makes total sense that ${concept} is playing a role in how you're reflecting today.` : "Every step of this journey is worth exploring."}\n\nWhat feels like the most helpful focus for us to talk through together right now?`,
+    `I really appreciate you sharing your thoughts with me, ${firstName}. When you reflect on ${concept || 'what you just mentioned'}, what is the main emotion that comes up for you?`,
+    `That's really insightful, ${firstName}. Staying connected with how you're feeling is such an important part of mindfulness.\n\nWhat would feel like a gentle, supportive step for yourself as you move through today?`,
+  ];
+
+  return generalReplies[historyLength % generalReplies.length];
+}
+
 // -------------------------------------------------------------
 // Server-Side AI Clinical Assistant Companion Endpoint
 // -------------------------------------------------------------
@@ -234,32 +285,36 @@ app.post('/api/ai/chat', async (req, res) => {
   try {
     const { prompt, history = [], userName = 'friend' } = req.body;
     const cleanPrompt = (prompt || '').trim();
+    const firstName = extractFirstName(userName);
 
     if (!cleanPrompt) {
-      return res.json({ reply: `Hello ${userName}! How are you feeling today? I'm here to support you.` });
+      return res.json({ reply: `Hello ${firstName}! How are you feeling today? I'm here to support you.` });
     }
 
     const lower = cleanPrompt.toLowerCase();
     const isGreeting = /^(hi|hello|hey|greetings|good morning|good afternoon|good evening|hi there|hey there|howdy)(\s|!|\.|\?|$)/i.test(lower);
 
     if (isGreeting) {
-      const firstName = userName.split(' ')[0] || 'friend';
+      const greetingOptions = [
+        `Hello ${firstName}! 👋 It's wonderful to connect with you today. How are you feeling right now, and what's on your mind?`,
+        `Hi ${firstName}! 😊 Good to see you here. How has your day been treating you so far?`,
+        `Hey ${firstName}! 👋 I'm here and ready to listen. What would you like to talk about today?`,
+      ];
       return res.json({
-        reply: `Hello ${firstName}! 👋 It's wonderful to connect with you today. How are you feeling right now, and what's on your mind?`,
+        reply: greetingOptions[history.length % greetingOptions.length],
       });
     }
 
     const systemPrompt = `You are MindBloom, a warm, reasonable, highly empathetic human clinical psychologist companion.
-You are conversing with ${userName}.
+You are conversing with ${firstName}.
 - Speak naturally like a caring human therapist in a warm, relaxed conversation.
 - Do NOT output robotic templates or rigid bullet point dumps.
-- Respond directly to what ${userName} shared.
-- If ${userName} says hello or greets you, respond warmly and ask how they are feeling today.
-- Keep responses concise (2-3 paragraphs max) and ask a natural, caring open question to continue the conversation.`;
+- Do NOT repeat canned fallback lines. Respond directly to what ${firstName} shared with genuine human depth and dynamic reflection.
+- Keep responses concise (2-3 short paragraphs max) and ask a natural, caring open question to continue the conversation naturally.`;
 
     const messages = [
       { role: 'system', content: systemPrompt },
-      ...history.slice(-8).map((m: any) => ({
+      ...history.slice(-6).map((m: any) => ({
         role: m.is_ai ? 'assistant' : 'user',
         content: m.content,
       })),
@@ -281,25 +336,23 @@ You are conversing with ${userName}.
       });
 
       if (response.ok) {
-        const data = await response.json();
-        aiReply = data.choices?.[0]?.message?.content;
+        const text = await response.text();
+        if (text && text.length > 5 && !text.startsWith('<')) {
+          try {
+            const parsed = JSON.parse(text);
+            aiReply = parsed.choices?.[0]?.message?.content || parsed.text || null;
+          } catch {
+            // Raw text response from Pollinations
+            aiReply = text;
+          }
+        }
       }
     } catch (e) {
       console.warn('Server-side Pollinations AI call notice:', e);
     }
 
-    if (!aiReply) {
-      // Local natural dialogue response
-      const firstName = userName.split(' ')[0] || 'friend';
-      if (lower.includes('stress') || lower.includes('tired') || lower.includes('overwhelm')) {
-        aiReply = `I hear you, ${firstName}. Feeling overwhelmed makes complete sense when you've been carrying a lot.\n\nYou don't have to tackle everything today. What is one small burden we can set aside for now so you can give yourself space to breathe?`;
-      } else if (lower.includes('anxi') || lower.includes('panic') || lower.includes('worry')) {
-        aiReply = `I can feel the worry in your words, ${firstName}. Take a slow, gentle breath with me right now. You are safe here.\n\nIs there a specific thought that feels most intense right now, or is it more of a general feeling of tension? We can take it as slow as you need.`;
-      } else if (lower.includes('sad') || lower.includes('lonely') || lower.includes('hurt')) {
-        aiReply = `I'm really sorry you're feeling down, ${firstName}. Sitting with heavy emotions can feel exhausting, but I'm glad you're sharing this with me.\n\nYou don't have to carry it alone. How long have you been feeling this way? I'm right here to listen.`;
-      } else {
-        aiReply = `Thank you for sharing that with me, ${firstName}. It sounds like this is playing a big role in how you're feeling right now.\n\nHow has this been affecting your energy today, and what would feel like the most supportive focus for us right now?`;
-      }
+    if (!aiReply || aiReply.includes('error') || aiReply.length < 10) {
+      aiReply = generateDynamicHumanReply(cleanPrompt, userName, history.length);
     }
 
     return res.json({ reply: aiReply });
