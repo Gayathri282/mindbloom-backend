@@ -904,6 +904,33 @@ app.delete('/api/slots/:slotId', async (req, res) => {
   }
 });
 
+// -------------------------------------------------------------
+// Dynamic Session Type Management Endpoints
+// -------------------------------------------------------------
+
+app.get('/api/session-types', async (req, res) => {
+  try {
+    const sessionTypes = dbStore.getSessionTypes();
+    res.json({ success: true, sessionTypes: sessionTypes || [] });
+  } catch (e: any) {
+    res.status(500).json({ error: 'Failed to fetch session types', details: e.message });
+  }
+});
+
+app.post('/api/session-types', async (req, res) => {
+  try {
+    const st = req.body;
+    if (!st || !st.id || !st.counselor_id) {
+      return res.status(400).json({ error: 'session type object with id and counselor_id is required.' });
+    }
+
+    dbStore.saveSessionType(st);
+    res.json({ success: true, message: 'Session type saved successfully.', sessionType: st });
+  } catch (e: any) {
+    res.status(500).json({ error: 'Failed to save session type', details: e.message });
+  }
+});
+
 // Server Crisis Language Scanner & Audit Logger Endpoint
 app.post('/api/crisis/detect', async (req, res) => {
   const { message, patientId, patientName } = req.body;
