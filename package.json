@@ -21,10 +21,12 @@
     "express": "^4.21.2",
     "mongoose": "^9.9.1",
     "multer": "^2.2.0",
+    "nodemailer": "^9.0.5",
     "razorpay": "^2.9.8",
     "typescript": "^5.7.3"
   },
   "devDependencies": {
+    "@types/nodemailer": "^8.0.1",
     "tsx": "^4.19.2"
   }
 }
