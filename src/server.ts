@@ -675,6 +675,9 @@ app.post('/api/counselors/apply', async (req, res) => {
       submitted_at: new Date().toISOString(),
     };
 
+    // Save in persistent disk dbStore
+    dbStore.saveApplication(applicationRecord);
+
     try {
       if (await connectToDatabase()) {
         await CounselorApplicationModel.create(applicationRecord);
@@ -697,14 +700,22 @@ app.post('/api/counselors/apply', async (req, res) => {
 // 2. Get Counselor Applications Queue (Admin Endpoint)
 app.get('/api/counselors/applications', async (req, res) => {
   try {
-    if (await connectToDatabase()) {
-      const applications = await CounselorApplicationModel.find().sort({ submitted_at: -1 }).lean();
-      return res.json({ applications, source: 'MongoDB' });
+    let applications = dbStore.getApplications();
+
+    if (!applications || applications.length === 0) {
+      try {
+        if (await connectToDatabase()) {
+          applications = await CounselorApplicationModel.find().sort({ submitted_at: -1 }).lean();
+        }
+      } catch (e) {
+        console.warn('MongoDB fetch applications notice:', e);
+      }
     }
+
+    res.json({ applications: applications || [], source: 'dbStore' });
   } catch (e) {
-    // Memory fallback
+    res.json({ applications: [], source: 'Fallback' });
   }
-  res.json({ applications: [], source: 'Memory' });
 });
 
 // 3. Admin Approve / Reject Counselor Verification Endpoint
@@ -717,6 +728,16 @@ app.post('/api/counselors/verify', async (req, res) => {
     }
 
     const updatedStatus = action === 'approved' ? 'approved' : 'rejected';
+
+    // Update in persistent disk dbStore
+    const storeApp = dbStore.getApplications().find((a: any) => a.id === applicationId);
+    if (storeApp) {
+      dbStore.saveApplication({
+        ...storeApp,
+        status: updatedStatus,
+        rejection_reason: rejectionReason || '',
+      });
+    }
 
     try {
       if (await connectToDatabase()) {
