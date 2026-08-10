@@ -1,0 +1,18 @@
+{
+  "appointments": [],
+  "counselorApplications": [],
+  "sessionTypes": [
+    {
+      "id": "st-test-750",
+      "counselor_id": "therapist-1",
+      "duration_minutes": 45,
+      "price": 750,
+      "label": "45-Minute Therapy Session (₹750)",
+      "is_active": true
+    }
+  ],
+  "chatMessages": [],
+  "carePlans": [],
+  "users": [],
+  "slots": []
+}

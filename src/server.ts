@@ -147,20 +147,34 @@ app.post('/api/payment/create-payment-link', async (req, res) => {
       counselorName,
       sessionTypeId,
       durationMinutes = 50,
-      price = 999,
+      price,
     } = req.body;
 
     if (!slotId) {
       return res.status(400).json({ error: 'slotId is required to create a payment link.' });
     }
 
-    let authoritativePrice = Number(price) || 499;
+    let authoritativePrice = 0;
+    const dbSessionTypes = dbStore.getSessionTypes() || [];
+
     if (sessionTypeId) {
-      const dbSt = dbStore.getSessionTypes().find((st: any) => st.id === sessionTypeId);
-      if (dbSt && dbSt.price) {
+      const dbSt = dbSessionTypes.find((st: any) => st.id === sessionTypeId);
+      if (dbSt && Number(dbSt.price) > 0) {
         authoritativePrice = Number(dbSt.price);
       }
     }
+
+    if (!authoritativePrice && durationMinutes) {
+      const matchByDuration = dbSessionTypes.find((st: any) => st.duration_minutes === Number(durationMinutes));
+      if (matchByDuration && Number(matchByDuration.price) > 0) {
+        authoritativePrice = Number(matchByDuration.price);
+      }
+    }
+
+    if (!authoritativePrice) {
+      authoritativePrice = Number(price) > 0 ? Number(price) : 750;
+    }
+
     const amountInPaise = Math.round(authoritativePrice * 100);
     const referenceId = `appt_ref_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
     const description = `MindBloom — ${durationMinutes} min session with ${counselorName || 'Clinical Counselor'}`;
@@ -590,7 +604,7 @@ app.post('/api/payment/verify-payment', async (req, res) => {
       slotId,
       patientId,
       patientName,
-      amount = 999,
+      amount,
     } = req.body;
 
     if (!razorpay_order_id || !razorpay_payment_id) {
@@ -836,7 +850,7 @@ app.post('/api/counselors/verify', async (req, res) => {
             id: `st-30m-${app.user_id}`,
             counselor_id: app.user_id,
             duration_minutes: 30,
-            price: 499,
+            price: app.starting_price || 750,
             label: '30-Minute Focus Session',
             is_active: true,
           };
@@ -844,11 +858,17 @@ app.post('/api/counselors/verify', async (req, res) => {
             id: `st-60m-${app.user_id}`,
             counselor_id: app.user_id,
             duration_minutes: 60,
-            price: 999,
+            price: (app.starting_price || 750) * 2 - 100,
             label: '60-Minute Comprehensive Consultation',
             is_active: true,
           };
-          await SessionTypeModel.create([default30Min, default60Min]);
+          dbStore.saveSessionType(default30Min);
+          dbStore.saveSessionType(default60Min);
+          try {
+            await SessionTypeModel.create([default30Min, default60Min]);
+          } catch (e) {
+            console.warn('MongoDB SessionType create notice:', e);
+          }
         }
       }
     } catch (e) {
