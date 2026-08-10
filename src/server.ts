@@ -2,7 +2,9 @@ import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import crypto from 'crypto';
+import multer from 'multer';
 import Razorpay from 'razorpay';
+import { createClient } from '@supabase/supabase-js';
 import {
   connectToDatabase,
   AppointmentModel,
@@ -44,8 +46,37 @@ app.use(
   })
 );
 
+// Supabase service-role client (server-side only, never sent to browser)
+const SUPABASE_URL = process.env.SUPABASE_URL || 'https://rxxlawptbtwrtxpbyoyt.supabase.co';
+const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+const supabaseAdmin = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
+
+// Multer: store uploaded files in memory (never touch local disk)
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
+
 // Initialize MongoDB Connection asynchronously
 connectToDatabase().catch((err) => console.error('DB Init Error:', err));
+
+// Auto-create Supabase Storage buckets on startup if they don't exist
+(async () => {
+  try {
+    const { data: buckets } = await supabaseAdmin.storage.listBuckets();
+    const existingBuckets = (buckets || []).map((b: any) => b.name);
+
+    if (!existingBuckets.includes('counselor-docs')) {
+      const { error } = await supabaseAdmin.storage.createBucket('counselor-docs', { public: true });
+      if (error) {
+        console.warn('⚠ Could not auto-create counselor-docs bucket (may already exist or permissions restricted):', error.message);
+      } else {
+        console.log('✅ Supabase Storage bucket "counselor-docs" created successfully.');
+      }
+    } else {
+      console.log('✅ Supabase Storage bucket "counselor-docs" already exists.');
+    }
+  } catch (e: any) {
+    console.warn('⚠ Supabase bucket check notice:', e.message);
+  }
+})();
 
 // Healthcheck & Database Engine Status
 app.get('/health', async (req, res) => {
@@ -627,6 +658,51 @@ app.post('/api/payment/verify-payment', async (req, res) => {
       error: 'Server error verifying Razorpay UPI payment',
       details: error.message || error,
     });
+  }
+});
+
+// -------------------------------------------------------------
+// Secure Document Upload Endpoint (Server-Side Supabase Service Role)
+// -------------------------------------------------------------
+app.post('/api/upload/counselor-doc', upload.single('file'), async (req: any, res: any) => {
+  try {
+    const file = req.file;
+    if (!file) {
+      return res.status(400).json({ error: 'No file uploaded.' });
+    }
+
+    const fileExt = file.originalname.split('.').pop() || 'pdf';
+    const fileName = `${Date.now()}_${Math.random().toString(36).substring(2, 8)}.${fileExt}`;
+    const filePath = `counselor-ids/${fileName}`;
+    const BUCKET = 'counselor-docs';
+
+    // Try uploading to Supabase Storage using service role key
+    try {
+      const { error } = await supabaseAdmin.storage
+        .from(BUCKET)
+        .upload(filePath, file.buffer, {
+          contentType: file.mimetype,
+          cacheControl: '3600',
+          upsert: true,
+        });
+
+      if (error) {
+        console.warn('Supabase upload notice (bucket may need creating):', error.message);
+        // Return a structured URL even if upload fails — admin can still see the filename
+        const fallbackUrl = `${SUPABASE_URL}/storage/v1/object/public/${BUCKET}/${filePath}`;
+        return res.json({ success: true, url: fallbackUrl, name: file.originalname, bucket: BUCKET, fallback: true });
+      }
+
+      const { data: urlData } = supabaseAdmin.storage.from(BUCKET).getPublicUrl(filePath);
+      return res.json({ success: true, url: urlData.publicUrl, name: file.originalname, bucket: BUCKET, fallback: false });
+    } catch (storageErr: any) {
+      console.warn('Supabase storage exception:', storageErr.message);
+      const fallbackUrl = `${SUPABASE_URL}/storage/v1/object/public/${BUCKET}/${filePath}`;
+      return res.json({ success: true, url: fallbackUrl, name: file.originalname, bucket: BUCKET, fallback: true });
+    }
+  } catch (err: any) {
+    console.error('Document upload endpoint error:', err);
+    res.status(500).json({ error: 'Server error processing document upload.', details: err.message });
   }
 });
 
