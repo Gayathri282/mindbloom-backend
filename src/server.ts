@@ -12,6 +12,7 @@ import {
   CounselorApplicationModel,
   SessionTypeModel,
 } from './db';
+import { dbStore } from './dbStore';
 
 dotenv.config();
 
@@ -181,7 +182,7 @@ app.post('/api/payment/create-payment-link', async (req, res) => {
       id: referenceId,
       reference_id: referenceId,
       patient_id: patientId || 'patient-1',
-      patient_name: patientName || 'New Patient Profile',
+      patient_name: patientName || 'Patient',
       therapist_id: counselorId || 'therapist-1',
       therapist_name: counselorName || 'Dr. Sarah Jenkins, Psy.D.',
       slot_id: slotId,
@@ -195,6 +196,9 @@ app.post('/api/payment/create-payment-link', async (req, res) => {
       expires_at: expiresAt,
       created_at: new Date().toISOString(),
     };
+
+    // Save in persistent disk DB store
+    dbStore.saveAppointment(appointmentRecord);
 
     // Save in MongoDB asynchronously
     try {
@@ -220,6 +224,88 @@ app.post('/api/payment/create-payment-link', async (req, res) => {
   } catch (error: any) {
     console.error('Error creating Razorpay Payment Link:', error);
     res.status(500).json({ error: 'Server error creating Razorpay Payment Link', details: error.message });
+  }
+});
+
+// -------------------------------------------------------------
+// Server-Side AI Clinical Assistant Companion Endpoint
+// -------------------------------------------------------------
+app.post('/api/ai/chat', async (req, res) => {
+  try {
+    const { prompt, history = [], userName = 'friend' } = req.body;
+    const cleanPrompt = (prompt || '').trim();
+
+    if (!cleanPrompt) {
+      return res.json({ reply: `Hello ${userName}! How are you feeling today? I'm here to support you.` });
+    }
+
+    const lower = cleanPrompt.toLowerCase();
+    const isGreeting = /^(hi|hello|hey|greetings|good morning|good afternoon|good evening|hi there|hey there|howdy)(\s|!|\.|\?|$)/i.test(lower);
+
+    if (isGreeting) {
+      const firstName = userName.split(' ')[0] || 'friend';
+      return res.json({
+        reply: `Hello ${firstName}! 👋 It's wonderful to connect with you today. How are you feeling right now, and what's on your mind?`,
+      });
+    }
+
+    const systemPrompt = `You are MindBloom, a warm, reasonable, highly empathetic human clinical psychologist companion.
+You are conversing with ${userName}.
+- Speak naturally like a caring human therapist in a warm, relaxed conversation.
+- Do NOT output robotic templates or rigid bullet point dumps.
+- Respond directly to what ${userName} shared.
+- If ${userName} says hello or greets you, respond warmly and ask how they are feeling today.
+- Keep responses concise (2-3 paragraphs max) and ask a natural, caring open question to continue the conversation.`;
+
+    const messages = [
+      { role: 'system', content: systemPrompt },
+      ...history.slice(-8).map((m: any) => ({
+        role: m.is_ai ? 'assistant' : 'user',
+        content: m.content,
+      })),
+      { role: 'user', content: cleanPrompt },
+    ];
+
+    let aiReply = null;
+
+    // Call Pollinations Public LLM API from server
+    try {
+      const response = await fetch('https://text.pollinations.ai/openai', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          messages,
+          model: 'openai',
+          seed: Math.floor(Math.random() * 10000),
+        }),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        aiReply = data.choices?.[0]?.message?.content;
+      }
+    } catch (e) {
+      console.warn('Server-side Pollinations AI call notice:', e);
+    }
+
+    if (!aiReply) {
+      // Local natural dialogue response
+      const firstName = userName.split(' ')[0] || 'friend';
+      if (lower.includes('stress') || lower.includes('tired') || lower.includes('overwhelm')) {
+        aiReply = `I hear you, ${firstName}. Feeling overwhelmed makes complete sense when you've been carrying a lot.\n\nYou don't have to tackle everything today. What is one small burden we can set aside for now so you can give yourself space to breathe?`;
+      } else if (lower.includes('anxi') || lower.includes('panic') || lower.includes('worry')) {
+        aiReply = `I can feel the worry in your words, ${firstName}. Take a slow, gentle breath with me right now. You are safe here.\n\nIs there a specific thought that feels most intense right now, or is it more of a general feeling of tension? We can take it as slow as you need.`;
+      } else if (lower.includes('sad') || lower.includes('lonely') || lower.includes('hurt')) {
+        aiReply = `I'm really sorry you're feeling down, ${firstName}. Sitting with heavy emotions can feel exhausting, but I'm glad you're sharing this with me.\n\nYou don't have to carry it alone. How long have you been feeling this way? I'm right here to listen.`;
+      } else {
+        aiReply = `Thank you for sharing that with me, ${firstName}. It sounds like this is playing a big role in how you're feeling right now.\n\nHow has this been affecting your energy today, and what would feel like the most supportive focus for us right now?`;
+      }
+    }
+
+    return res.json({ reply: aiReply });
+  } catch (error: any) {
+    console.error('Error processing AI chat endpoint:', error);
+    res.status(500).json({ error: 'Server error generating AI response' });
   }
 });
 
@@ -266,6 +352,17 @@ app.post('/api/webhooks/razorpay', async (req: any, res) => {
       const paymentId = paymentEntity.payment_id || paymentEntity.id || `pay_wh_${Date.now()}`;
 
       if (refId) {
+        // Sync with persistent disk dbStore
+        const storeAppt = dbStore.getAppointment(refId);
+        if (storeAppt) {
+          dbStore.saveAppointment({
+            ...storeAppt,
+            payment_status: 'paid',
+            payment_id: paymentId,
+            status: 'scheduled',
+          });
+        }
+
         try {
           if (await connectToDatabase()) {
             await AppointmentModel.findOneAndUpdate(
@@ -294,6 +391,15 @@ app.post('/api/webhooks/razorpay', async (req: any, res) => {
       const refId = paymentEntity.reference_id || paymentEntity.notes?.reference_id;
 
       if (refId) {
+        // Sync with persistent disk dbStore
+        const storeAppt = dbStore.getAppointment(refId);
+        if (storeAppt) {
+          dbStore.saveAppointment({
+            ...storeAppt,
+            payment_status: 'failed',
+          });
+        }
+
         try {
           if (await connectToDatabase()) {
             await AppointmentModel.findOneAndUpdate(
@@ -326,12 +432,22 @@ app.get('/api/appointments/:id/status', async (req, res) => {
   try {
     const { id } = req.params;
 
-    if (await connectToDatabase()) {
-      const appt = await AppointmentModel.findOne({
-        $or: [{ id }, { reference_id: id }],
-      }).lean();
+    // First check persistent disk store
+    let appt: any = dbStore.getAppointment(id);
 
-      if (appt) {
+    if (!appt) {
+      try {
+        if (await connectToDatabase()) {
+          appt = await AppointmentModel.findOne({
+            $or: [{ id }, { reference_id: id }],
+          }).lean();
+        }
+      } catch (e) {
+        console.warn('MongoDB query notice:', e);
+      }
+    }
+
+    if (appt) {
         // Check for 15-minute slot lock expiration
         if (
           appt.payment_status === 'pending' &&
@@ -362,9 +478,8 @@ app.get('/api/appointments/:id/status', async (req, res) => {
           created_at: appt.created_at,
         });
       }
-    }
   } catch (e) {
-    // Fallback response
+    console.warn('Status endpoint notice:', e);
   }
 
   res.json({
