@@ -11,6 +11,7 @@ export interface DbSchema {
   chatMessages: any[];
   carePlans: any[];
   users: any[];
+  slots: any[];
 }
 
 const defaultDbData: DbSchema = {
@@ -20,6 +21,7 @@ const defaultDbData: DbSchema = {
   chatMessages: [],
   carePlans: [],
   users: [],
+  slots: [],
 };
 
 // Ensure data directory exists on startup
@@ -111,6 +113,28 @@ class DbStore {
     } else {
       this.data.sessionTypes.push(st);
     }
+    this.saveToDisk();
+  }
+
+  // Availability Slot operations
+  public getSlots() {
+    return this.data.slots || [];
+  }
+
+  public saveSlot(slot: any) {
+    if (!this.data.slots) this.data.slots = [];
+    const idx = this.data.slots.findIndex((item) => item.id === slot.id);
+    if (idx >= 0) {
+      this.data.slots[idx] = { ...this.data.slots[idx], ...slot };
+    } else {
+      this.data.slots.push(slot);
+    }
+    this.saveToDisk();
+  }
+
+  public deleteSlot(slotId: string) {
+    if (!this.data.slots) this.data.slots = [];
+    this.data.slots = this.data.slots.filter((s) => s.id !== slotId);
     this.saveToDisk();
   }
 }

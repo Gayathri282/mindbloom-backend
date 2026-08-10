@@ -860,6 +860,50 @@ app.post('/api/counselors/verify', async (req, res) => {
   }
 });
 
+// -------------------------------------------------------------
+// Real-time Availability Slot Management Endpoints
+// -------------------------------------------------------------
+
+// 1. Get All Availability Slots Endpoint
+app.get('/api/slots', async (req, res) => {
+  try {
+    const slots = dbStore.getSlots();
+    res.json({ success: true, slots: slots || [] });
+  } catch (e: any) {
+    res.status(500).json({ error: 'Failed to fetch availability slots', details: e.message });
+  }
+});
+
+// 2. Publish / Update Availability Slot Endpoint
+app.post('/api/slots', async (req, res) => {
+  try {
+    const slot = req.body;
+    if (!slot || !slot.id || !slot.therapist_id) {
+      return res.status(400).json({ error: 'slot object with id and therapist_id is required.' });
+    }
+
+    dbStore.saveSlot(slot);
+    res.json({ success: true, message: 'Availability slot saved successfully.', slot });
+  } catch (e: any) {
+    res.status(500).json({ error: 'Failed to save slot', details: e.message });
+  }
+});
+
+// 3. Delete Availability Slot Endpoint
+app.delete('/api/slots/:slotId', async (req, res) => {
+  try {
+    const { slotId } = req.params;
+    if (!slotId) {
+      return res.status(400).json({ error: 'slotId is required.' });
+    }
+
+    dbStore.deleteSlot(slotId);
+    res.json({ success: true, message: 'Slot deleted successfully.', slotId });
+  } catch (e: any) {
+    res.status(500).json({ error: 'Failed to delete slot', details: e.message });
+  }
+});
+
 // Server Crisis Language Scanner & Audit Logger Endpoint
 app.post('/api/crisis/detect', async (req, res) => {
   const { message, patientId, patientName } = req.body;
