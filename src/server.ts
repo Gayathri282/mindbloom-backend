@@ -154,7 +154,14 @@ app.post('/api/payment/create-payment-link', async (req, res) => {
       return res.status(400).json({ error: 'slotId is required to create a payment link.' });
     }
 
-    const amountInPaise = Math.round(Number(price) * 100);
+    let authoritativePrice = Number(price) || 499;
+    if (sessionTypeId) {
+      const dbSt = dbStore.getSessionTypes().find((st: any) => st.id === sessionTypeId);
+      if (dbSt && dbSt.price) {
+        authoritativePrice = Number(dbSt.price);
+      }
+    }
+    const amountInPaise = Math.round(authoritativePrice * 100);
     const referenceId = `appt_ref_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
     const description = `MindBloom — ${durationMinutes} min session with ${counselorName || 'Clinical Counselor'}`;
     const appUrl = process.env.APP_URL || 'http://localhost:3000';
@@ -566,10 +573,10 @@ app.get('/api/appointments/:id/status', async (req, res) => {
     console.warn('Status endpoint notice:', e);
   }
 
-  res.json({
+  res.status(404).json({
     appointmentId: req.params.id,
-    payment_status: 'paid', // Default test mode verified response if DB offline
-    source: 'Memory Fallback',
+    payment_status: 'pending',
+    message: 'Appointment record not found or payment pending.',
   });
 });
 
@@ -928,6 +935,57 @@ app.post('/api/session-types', async (req, res) => {
     res.json({ success: true, message: 'Session type saved successfully.', sessionType: st });
   } catch (e: any) {
     res.status(500).json({ error: 'Failed to save session type', details: e.message });
+  }
+});
+
+// -------------------------------------------------------------
+// Real-time Persistent Appointment / Session Endpoints
+// -------------------------------------------------------------
+
+app.get('/api/appointments', async (req, res) => {
+  try {
+    const appointments = dbStore.getAppointments();
+    res.json({ success: true, appointments: appointments || [] });
+  } catch (e: any) {
+    res.status(500).json({ error: 'Failed to fetch appointments', details: e.message });
+  }
+});
+
+app.post('/api/appointments', async (req, res) => {
+  try {
+    const appt = req.body;
+    if (!appt || !appt.id) {
+      return res.status(400).json({ error: 'appointment object with id is required.' });
+    }
+
+    dbStore.saveAppointment(appt);
+    res.json({ success: true, message: 'Appointment saved successfully.', appointment: appt });
+  } catch (e: any) {
+    res.status(500).json({ error: 'Failed to save appointment', details: e.message });
+  }
+});
+
+app.patch('/api/appointments/:id/status', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status, payment_status } = req.body;
+
+    const existing = dbStore.getAppointment(id);
+    if (!existing) {
+      return res.status(404).json({ error: 'Appointment not found' });
+    }
+
+    const updated = {
+      ...existing,
+      status: status || existing.status,
+      payment_status: payment_status || existing.payment_status,
+      updated_at: new Date().toISOString(),
+    };
+
+    dbStore.saveAppointment(updated);
+    res.json({ success: true, message: 'Appointment status updated successfully.', appointment: updated });
+  } catch (e: any) {
+    res.status(500).json({ error: 'Failed to update appointment status', details: e.message });
   }
 });
 
