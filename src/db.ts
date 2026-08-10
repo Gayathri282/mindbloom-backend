@@ -18,9 +18,13 @@ const appointmentSchema = new Schema({
   completed_at: String,
   payment_id: String,
   razorpay_order_id: String,
-  payment_status: { type: String, enum: ['pending', 'paid', 'failed'], default: 'pending' },
+  payment_link_id: String,
+  short_url: String,
+  reference_id: { type: String, index: true },
+  expires_at: String,
+  payment_status: { type: String, enum: ['pending', 'paid', 'failed', 'expired'], default: 'pending' },
   amount_paid: Number,
-  payment_method: { type: String, default: 'UPI' },
+  payment_method: { type: String, default: 'Razorpay Payment Link' },
   created_at: { type: String, default: () => new Date().toISOString() },
 });
 
