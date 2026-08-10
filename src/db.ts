@@ -16,6 +16,11 @@ const appointmentSchema = new Schema({
   therapist_joined_at: String,
   patient_joined_at: String,
   completed_at: String,
+  payment_id: String,
+  razorpay_order_id: String,
+  payment_status: { type: String, enum: ['pending', 'paid', 'failed'], default: 'pending' },
+  amount_paid: Number,
+  payment_method: { type: String, default: 'UPI' },
   created_at: { type: String, default: () => new Date().toISOString() },
 });
 
@@ -57,10 +62,43 @@ const carePlanSchema = new Schema({
   updated_at: { type: String, default: () => new Date().toISOString() },
 });
 
+// 5. Counselor Application Schema
+const counselorApplicationSchema = new Schema({
+  id: { type: String, required: true, unique: true },
+  user_id: { type: String, required: true, index: true },
+  full_name: { type: String, required: true },
+  email: { type: String, required: true },
+  avatar_url: String,
+  bio: String,
+  license_number: String,
+  certifications: [String],
+  degree: String,
+  specialties: [String],
+  id_document_name: String,
+  id_document_url: String,
+  years_of_experience: Number,
+  languages: [String],
+  status: { type: String, enum: ['pending', 'approved', 'rejected'], default: 'pending', index: true },
+  rejection_reason: String,
+  submitted_at: { type: String, default: () => new Date().toISOString() },
+});
+
+// 6. Session Type Schema (30-min & 60-min default options)
+const sessionTypeSchema = new Schema({
+  id: { type: String, required: true, unique: true },
+  counselor_id: { type: String, required: true, index: true },
+  duration_minutes: { type: Number, required: true },
+  price: { type: Number, required: true },
+  label: { type: String, required: true },
+  is_active: { type: Boolean, default: true },
+});
+
 export const AppointmentModel = mongoose.models.Appointment || mongoose.model('Appointment', appointmentSchema);
 export const ChatMessageModel = mongoose.models.ChatMessage || mongoose.model('ChatMessage', chatMessageSchema);
 export const CrisisLogModel = mongoose.models.CrisisLog || mongoose.model('CrisisLog', crisisLogSchema);
 export const CarePlanModel = mongoose.models.CarePlan || mongoose.model('CarePlan', carePlanSchema);
+export const CounselorApplicationModel = mongoose.models.CounselorApplication || mongoose.model('CounselorApplication', counselorApplicationSchema);
+export const SessionTypeModel = mongoose.models.SessionType || mongoose.model('SessionType', sessionTypeSchema);
 
 let isConnected = false;
 
