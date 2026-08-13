@@ -844,41 +844,9 @@ app.post('/api/counselors/verify', async (req, res) => {
           { new: true }
         );
 
-        // On approval, seed default 30-min, 45-min & 60-min session types for the counselor
+        // On approval, allow counselor to define their own custom session options without forcing preset prices
         if (action === 'approved' && app) {
-          const basePrice = app.starting_price || 499;
-          const default30Min = {
-            id: `st-30m-${app.user_id}`,
-            counselor_id: app.user_id,
-            duration_minutes: 30,
-            price: basePrice,
-            label: '30-Minute Focus Session',
-            is_active: true,
-          };
-          const default45Min = {
-            id: `st-45m-${app.user_id}`,
-            counselor_id: app.user_id,
-            duration_minutes: 45,
-            price: Math.round(basePrice * 1.4),
-            label: '45-Minute Therapy Session',
-            is_active: true,
-          };
-          const default60Min = {
-            id: `st-60m-${app.user_id}`,
-            counselor_id: app.user_id,
-            duration_minutes: 60,
-            price: Math.round(basePrice * 1.8),
-            label: '60-Minute (1 Hour) Consultation',
-            is_active: true,
-          };
-          dbStore.saveSessionType(default30Min);
-          dbStore.saveSessionType(default45Min);
-          dbStore.saveSessionType(default60Min);
-          try {
-            await SessionTypeModel.create([default30Min, default45Min, default60Min]);
-          } catch (e) {
-            console.warn('MongoDB SessionType create notice:', e);
-          }
+          console.log(`✅ Counselor ${app.full_name} (${app.user_id}) verified and approved.`);
         }
       }
     } catch (e) {
