@@ -116,6 +116,11 @@ class DbStore {
     this.saveToDisk();
   }
 
+  public deleteSessionType(stId: string) {
+    this.data.sessionTypes = this.data.sessionTypes.filter((st) => st.id !== stId);
+    this.saveToDisk();
+  }
+
   // Availability Slot operations
   public getSlots() {
     return this.data.slots || [];

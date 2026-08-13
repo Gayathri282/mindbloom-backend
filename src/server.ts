@@ -844,28 +844,38 @@ app.post('/api/counselors/verify', async (req, res) => {
           { new: true }
         );
 
-        // On approval, seed default 30-min & 60-min session types for the counselor
+        // On approval, seed default 30-min, 45-min & 60-min session types for the counselor
         if (action === 'approved' && app) {
+          const basePrice = app.starting_price || 499;
           const default30Min = {
             id: `st-30m-${app.user_id}`,
             counselor_id: app.user_id,
             duration_minutes: 30,
-            price: app.starting_price || 750,
+            price: basePrice,
             label: '30-Minute Focus Session',
+            is_active: true,
+          };
+          const default45Min = {
+            id: `st-45m-${app.user_id}`,
+            counselor_id: app.user_id,
+            duration_minutes: 45,
+            price: Math.round(basePrice * 1.4),
+            label: '45-Minute Therapy Session',
             is_active: true,
           };
           const default60Min = {
             id: `st-60m-${app.user_id}`,
             counselor_id: app.user_id,
             duration_minutes: 60,
-            price: (app.starting_price || 750) * 2 - 100,
-            label: '60-Minute Comprehensive Consultation',
+            price: Math.round(basePrice * 1.8),
+            label: '60-Minute (1 Hour) Consultation',
             is_active: true,
           };
           dbStore.saveSessionType(default30Min);
+          dbStore.saveSessionType(default45Min);
           dbStore.saveSessionType(default60Min);
           try {
-            await SessionTypeModel.create([default30Min, default60Min]);
+            await SessionTypeModel.create([default30Min, default45Min, default60Min]);
           } catch (e) {
             console.warn('MongoDB SessionType create notice:', e);
           }
@@ -937,8 +947,16 @@ app.delete('/api/slots/:slotId', async (req, res) => {
 
 app.get('/api/session-types', async (req, res) => {
   try {
-    const sessionTypes = dbStore.getSessionTypes();
-    res.json({ success: true, sessionTypes: sessionTypes || [] });
+    const { counselor_id } = req.query;
+    let sessionTypes = dbStore.getSessionTypes() || [];
+
+    if (counselor_id && typeof counselor_id === 'string') {
+      sessionTypes = sessionTypes.filter(
+        (st: any) => st.counselor_id === counselor_id || st.counselor_id === 'therapist-1'
+      );
+    }
+
+    res.json({ success: true, sessionTypes });
   } catch (e: any) {
     res.status(500).json({ error: 'Failed to fetch session types', details: e.message });
   }
@@ -952,9 +970,69 @@ app.post('/api/session-types', async (req, res) => {
     }
 
     dbStore.saveSessionType(st);
+
+    try {
+      if (await connectToDatabase()) {
+        await SessionTypeModel.findOneAndUpdate({ id: st.id }, st, { upsert: true, new: true });
+      }
+    } catch (e) {
+      console.warn('MongoDB SessionType save notice:', e);
+    }
+
     res.json({ success: true, message: 'Session type saved successfully.', sessionType: st });
   } catch (e: any) {
     res.status(500).json({ error: 'Failed to save session type', details: e.message });
+  }
+});
+
+app.put('/api/session-types/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const updates = req.body;
+    const allSt = dbStore.getSessionTypes() || [];
+    const existing = allSt.find((item: any) => item.id === id);
+
+    if (!existing) {
+      return res.status(404).json({ error: 'Session type not found' });
+    }
+
+    const updated = { ...existing, ...updates, id };
+    dbStore.saveSessionType(updated);
+
+    try {
+      if (await connectToDatabase()) {
+        await SessionTypeModel.findOneAndUpdate({ id }, updated, { new: true });
+      }
+    } catch (e) {
+      console.warn('MongoDB SessionType update notice:', e);
+    }
+
+    res.json({ success: true, message: 'Session type updated successfully.', sessionType: updated });
+  } catch (e: any) {
+    res.status(500).json({ error: 'Failed to update session type', details: e.message });
+  }
+});
+
+app.delete('/api/session-types/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!id) {
+      return res.status(400).json({ error: 'session type id is required.' });
+    }
+
+    dbStore.deleteSessionType(id);
+
+    try {
+      if (await connectToDatabase()) {
+        await SessionTypeModel.deleteOne({ id });
+      }
+    } catch (e) {
+      console.warn('MongoDB SessionType delete notice:', e);
+    }
+
+    res.json({ success: true, message: 'Session type deleted successfully.', id });
+  } catch (e: any) {
+    res.status(500).json({ error: 'Failed to delete session type', details: e.message });
   }
 });
 
