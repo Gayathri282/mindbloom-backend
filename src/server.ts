@@ -154,6 +154,15 @@ app.post('/api/payment/create-payment-link', async (req, res) => {
       return res.status(400).json({ error: 'slotId is required to create a payment link.' });
     }
 
+    // Atomic Double-Booking Lock (Requirement #4): Prevent race conditions
+    const reservation = dbStore.reserveSlotAtomically(slotId, patientId || 'guest-patient');
+    if (!reservation.success) {
+      return res.status(409).json({
+        success: false,
+        error: reservation.message || 'This slot was just booked by another patient. Please choose another available time slot.',
+      });
+    }
+
     let authoritativePrice = -1;
     const dbSessionTypes = dbStore.getSessionTypes() || [];
 
@@ -1009,6 +1018,67 @@ app.delete('/api/session-types/:id', async (req, res) => {
     res.json({ success: true, message: 'Session type deleted successfully.', id });
   } catch (e: any) {
     res.status(500).json({ error: 'Failed to delete session type', details: e.message });
+  }
+});
+
+// -------------------------------------------------------------
+// Real-time Availability Slot Management Endpoints
+// -------------------------------------------------------------
+
+app.get('/api/slots', (req, res) => {
+  try {
+    const slots = dbStore.getSlots() || [];
+    // Requirement #3: Filter out expired slots against current server time
+    const now = Date.now();
+    const validSlots = slots.filter((slot: any) => {
+      if (slot.start_time) {
+        const slotTime = new Date(slot.start_time).getTime();
+        if (!isNaN(slotTime) && slotTime + 5 * 60 * 1000 < now) {
+          return false;
+        }
+      }
+      return true;
+    });
+
+    res.json({ success: true, slots: validSlots });
+  } catch (e: any) {
+    res.status(500).json({ error: 'Failed to fetch slots', details: e.message });
+  }
+});
+
+app.post('/api/slots', (req, res) => {
+  try {
+    const slot = req.body;
+    if (!slot || !slot.id) {
+      return res.status(400).json({ error: 'Slot object with valid id is required.' });
+    }
+
+    // Requirement #2: Backend validation enforcing slot date+time MUST be in the future relative to server time
+    let slotTimeMs = 0;
+    if (slot.start_time) {
+      slotTimeMs = new Date(slot.start_time).getTime();
+    }
+
+    if (slotTimeMs > 0 && slotTimeMs <= Date.now()) {
+      return res.status(400).json({
+        error: 'Cannot create an availability slot in the past. The slot date and start time must be in the future relative to current server time.',
+      });
+    }
+
+    dbStore.saveSlot(slot);
+    res.json({ success: true, message: 'Slot created successfully.', slot });
+  } catch (e: any) {
+    res.status(500).json({ error: 'Failed to create slot', details: e.message });
+  }
+});
+
+app.delete('/api/slots/:id', (req, res) => {
+  try {
+    const { id } = req.params;
+    dbStore.deleteSlot(id);
+    res.json({ success: true, message: 'Slot deleted successfully.', id });
+  } catch (e: any) {
+    res.status(500).json({ error: 'Failed to delete slot', details: e.message });
   }
 });
 

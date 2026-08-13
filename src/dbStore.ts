@@ -138,9 +138,40 @@ class DbStore {
   }
 
   public deleteSlot(slotId: string) {
-    if (!this.data.slots) this.data.slots = [];
+    if (!this.data.slots) return;
     this.data.slots = this.data.slots.filter((s) => s.id !== slotId);
     this.saveToDisk();
+  }
+
+  /**
+   * Atomically reserve/lock a slot for booking.
+   * Prevents race conditions where two patients click "book" on the same slot simultaneously.
+   * Returns { success: true } if reserved, or { success: false, message: string } if already locked.
+   */
+  public reserveSlotAtomically(slotId: string, patientId: string): { success: boolean; message?: string } {
+    if (!this.data.slots) this.data.slots = [];
+    const slot = this.data.slots.find((s) => s.id === slotId);
+
+    // Also check if an active appointment already exists for this slotId
+    const existingAppt = (this.data.appointments || []).find(
+      (a) => (a.slot_id === slotId || a.slotId === slotId) && a.status !== 'cancelled' && a.status !== 'missed'
+    );
+
+    if (existingAppt || (slot && (slot.is_booked || (slot.reserved_by && slot.reserved_by !== patientId)))) {
+      return {
+        success: false,
+        message: 'This slot was just booked by another patient. Please choose another available time slot.',
+      };
+    }
+
+    if (slot) {
+      slot.is_booked = true;
+      slot.reserved_by = patientId;
+      slot.reserved_at = new Date().toISOString();
+      this.saveToDisk();
+    }
+
+    return { success: true };
   }
 }
 
