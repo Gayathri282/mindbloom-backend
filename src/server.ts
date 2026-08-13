@@ -154,25 +154,33 @@ app.post('/api/payment/create-payment-link', async (req, res) => {
       return res.status(400).json({ error: 'slotId is required to create a payment link.' });
     }
 
-    let authoritativePrice = 0;
+    let authoritativePrice = -1;
     const dbSessionTypes = dbStore.getSessionTypes() || [];
 
     if (sessionTypeId) {
       const dbSt = dbSessionTypes.find((st: any) => st.id === sessionTypeId);
-      if (dbSt && Number(dbSt.price) > 0) {
+      if (dbSt && dbSt.price !== undefined && dbSt.price !== null) {
         authoritativePrice = Number(dbSt.price);
       }
     }
 
-    if (!authoritativePrice && durationMinutes) {
-      const matchByDuration = dbSessionTypes.find((st: any) => st.duration_minutes === Number(durationMinutes));
-      if (matchByDuration && Number(matchByDuration.price) > 0) {
+    if (authoritativePrice < 0 && durationMinutes && counselorId) {
+      const matchByDuration = dbSessionTypes.find(
+        (st: any) =>
+          (st.counselor_id === counselorId || st.counselor_id === 'therapist-1') &&
+          Number(st.duration_minutes) === Number(durationMinutes)
+      );
+      if (matchByDuration && matchByDuration.price !== undefined && matchByDuration.price !== null) {
         authoritativePrice = Number(matchByDuration.price);
       }
     }
 
-    if (!authoritativePrice) {
-      authoritativePrice = Number(price) > 0 ? Number(price) : 750;
+    if (authoritativePrice < 0 && price !== undefined && price !== null) {
+      authoritativePrice = Number(price);
+    }
+
+    if (authoritativePrice < 0) {
+      authoritativePrice = 10;
     }
 
     const amountInPaise = Math.round(authoritativePrice * 100);
@@ -1010,6 +1018,7 @@ app.delete('/api/session-types/:id', async (req, res) => {
 
 app.get('/api/appointments', async (req, res) => {
   try {
+    reconcileAppointmentsStatus();
     const appointments = dbStore.getAppointments();
     res.json({ success: true, appointments: appointments || [] });
   } catch (e: any) {
@@ -1088,6 +1097,9 @@ function reconcileAppointmentsStatus() {
     console.warn('Notice reconciling appointment status:', e);
   }
 }
+
+// Periodically reconcile expired/missed appointments every 15 seconds
+setInterval(reconcileAppointmentsStatus, 15000);
 
 // -------------------------------------------------------------
 // Transactional Prescription Email Endpoint

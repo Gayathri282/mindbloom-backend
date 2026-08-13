@@ -3,11 +3,11 @@
   "counselorApplications": [],
   "sessionTypes": [
     {
-      "id": "st-test-750",
+      "id": "st-45m-10",
       "counselor_id": "therapist-1",
       "duration_minutes": 45,
-      "price": 750,
-      "label": "45-Minute Therapy Session (₹750)",
+      "price": 10,
+      "label": "45-Minute Therapy Session",
       "is_active": true
     }
   ],
